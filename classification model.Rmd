@@ -1,0 +1,445 @@
+---
+title: "MODEL COMPARISON FOR STOCK WAB RETURN AND RISK RATE"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+
+```{r}
+library(class)
+library(tidymodels)
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(gmodels)
+library(ROCR)
+library(Metrics)
+library(dbplyr)
+library(psych)
+library(naivebayes)
+library(ggplot2)
+library(e1071)
+library(reshape2)
+library(pROC)
+```
+
+```{r}
+df = load("RData")
+
+head(WABret300)
+str(WABret300)
+summary(WABret300)
+```
+```{r}
+colnames(WABret300)
+WABret300 = WABret300 %>% rename(lag1ret = Lag1ret,lag2ret = Lag2ret, wabret = WABret)
+WABret300 = WABret300[2:4]
+WABret300$wabret = as.factor(WABret300$wabret)
+```
+LOGISTIC REGRESSION MODEL FOR WABRET N = 300
+```{r}
+set.seed(1234)
+WABret_split = initial_split(WABret300, prop = 0.5)
+ret_train_data = training(WABret_split)
+ret_test_data = testing(WABret_split)
+logistic_model = glm(wabret ~., family = "binomial",
+                     data =ret_train_data)
+
+summary(logistic_model)
+logistic_model$coefficients
+```
+PREDICTION OF WABRET USING LOGISTIC REGRESSION
+```{r}
+pred = predict(logistic_model, new_data = ret_test_data, 
+               type = "response")
+
+contrasts(WABret300$wabret)
+head(table(pred, ret_test_data$wabret))
+pvalue = 1 - pchisq(3.185, df = 2)
+anova(logistic_model, test = "Chisq")
+```
+Two different extractor functions have been used to see our result. The first gives what amounts to regression coefficients with the standard errors and z test. Accessing the deviance of the two predictor variable, one of the coefficient is significantly different from zero. The total deviance of both predictor variable is 3.185 points on 2 degree of freedom, for a p value is 0.203.
+
+Overall this logistic model seem to have performed poorly, showing no significant reduction in the deviance (no significant difference from the null model)
+```{r}
+
+```
+ACCESSING THE LOGISTIC MODEL VISUALLY
+PLOTTING ROC
+```{r}
+auc(ret_test_data$wabret, pred)
+pred_type = prediction(pred, ret_test_data$wabret)
+perf = performance(pred_type, measure = "tpr", x.measure = "fpr")
+summary(perf)
+plot(perf)
+```
+The ROC curve shows the trade off between sensitivity and 1- specificity. The closer the curve comes to the 45 degree diagonal of the ROC space, the less accurate the test. The AUC which is equivalent to the probability that a randomly chosen chosen positive instance that is high return is ranked higher than a randomly chosen negative instance. The closer AUC is close to 1, the better the given model is said to fit the data. Our AUC for WABreturn using logistic model is 0.4994
+```{r}
+
+```
+USING THE K NEAREST NEIGHBOR CLASSIFICATION FOR WABRET 
+```{r}
+suppressWarnings({
+set.seed(1234)
+#normalizing 
+normalize = function (x){
+  return((x - min(x))/ (max(x) - min (x))
+  )
+}
+WABret_n = as.data.frame(lapply(WABret300[c("lag1ret", "lag2ret")],
+                                normalize))
+summary(WABret_n)
+
+data_split = sample(1:nrow(WABret300),size=nrow(WABret300)*0.5,
+                    replace = FALSE) #random selection of 70% data.
+
+
+k_ret_train = WABret300[data_split,] # 50% training data
+k_ret_test = WABret300[-data_split,] # remaining 50% test data
+
+trControl = trainControl(method = "repeatedcv",
+                         number = 10,
+                         repeats = 3,
+                         classProbs = TRUE,
+                         summaryFunction = twoClassSummary)
+model_fit = train(wabret ~.-wabret,
+                  data = k_ret_train,
+                  method = "knn",
+                  trControl = trControl,
+                  tuneGrid = expand.grid(k = 1:10))
+})
+```
+PREDICTION AND MODEL PERFORMANCE FOR KNN CLASSIFICATION FOR WABRET
+```{r}
+pred = predict(model_fit, newdata = k_ret_test)
+summary(pred)
+sapply(c(is.vector, is.matrix, is.list, is.data.frame), do.call, list(pred))
+sapply(c(is.vector, is.matrix, is.list, is.data.frame), do.call, list(k_ret_test$wabret))
+#Model performance
+varImp(model_fit)
+model_fit
+
+confusionMatrix(pred, k_ret_train$wabret)
+```
+The K = 9 value chosen for knn tells us that the model chooses 9 closet points to say High return, and hence Low return will be predicted High using the majority vote of (5:4) The model accuracy is 47.33% with a specificity of 45.71%. ROC when k =9 is 0.4658
+```{r}
+
+```
+
+KNN CLASSIFICATION PLOT FOR WABRET
+```{r}
+plot(model_fit)
+```
+THE NAIVE BAYES CLASSIFICATION FOR WABRET (USING K FOLD CROSS VALIDATION)
+```{r}
+suppressWarnings({
+WABret300
+colnames(WABret300)
+str(WABret300)
+
+set.seed(1234)
+index = sample(2, nrow(WABret300), replace = T, 
+               prob = c(0.5, 0.5))
+trainControl = trainControl(method = "cv", number = 10)
+value_rm = na.omit(WABret300)
+set.seed(1234)
+bay_ret_train = value_rm[index == 1,]
+bay_ret_test = value_rm[index == 2, ]
+
+
+#Using the k fold validation
+bay_fit = train(wabret ~., data = bay_ret_train, method = "nb", trainControl
+                = trainControl)
+bay_fit
+})
+```
+THE NAIVE BAYES CLASSIFICATION USING THE LIBRARY E1021
+```{r}
+bay_fit2 = naive_bayes(wabret ~ bay_ret_train$lag1ret + bay_ret_train$lag2ret,
+                       data = bay_ret_train
+)
+bay_fit2
+
+summary(bay_fit2)
+```
+
+From the bay_fit2 model will have about 53% of our data points where WAB return rate is high and 47% has a low return rate 
+```{r}
+```
+PREDICTION VALUES AND MODEL PERFORMANCE
+```{r}
+suppressWarnings({
+p1 = predict(bay_fit, newdata = bay_ret_test)
+tab = confusionMatrix(p1, bay_ret_test$wabret, 
+                      positive = "HiRet") #confusion matrix
+tab
+})
+
+```
+Computing the accuracy for naive bayes classification using cross validation. Accuracy was used to select the optimal model using the largest value. The final values used for the model were fL = 0, usekernel = TRUE and adjust = 1.
+```{r}
+
+```
+
+THE NAVIE BAYES CLASSIFICATION PLOT
+```{r}
+WABret300 %>%
+  ggplot(aes(x = lag1ret, fill = wabret)) +
+  geom_density(alpha = 0.8, color = "black") +
+  ggtitle("DENSITY PLOT")
+WABret300 %>%
+  ggplot(aes(x = lag2ret, fill = wabret)) +
+  geom_density(alpha = 0.8, color = "black") +
+  ggtitle("DENSITY PLOT")
+
+pairs.panels(WABret300[-3])
+plot(bay_fit2)
+```
+The pair panels displays the correlation between the two independent variables lag1ret and lag2ret and it can be confirmed that correlation between this two variables is weak. 
+Looking at the density plot for lag1ret and lag2ret there is a significant amount of overlap and for lag2ret LoRet is higher than HiRet and the inverse is for lag1ret.This plots shows that there is more potential to develop a classification model but the model is likely to be less accurate as a result of this overlap
+
+SUPPORT VECTOR MACHINE CLASSFICATION FOR WABRET
+```{r}
+set.seed(1234)
+WABret_split = initial_split(WABret300, prop = 0.5)
+ret_train_data = training(WABret_split)
+ret_test_data = testing(WABret_split)
+
+
+svm_model2 = svm(formula = wabret ~.,
+                data = ret_train_data,
+                type = "C-classification"
+)
+
+summary(svm_model2)
+```
+SVM CLASSIFICATION USING CROSS VALIDATION
+```{r}
+set.seed(2022)
+#since we are tuning a lot of hyper parameter, the right approach will be to first do a random search before a grid search
+train_control = trainControl(method = "cv", number = 5, search = "random",
+                             savePredictions = T)
+model_fit_svm = train(wabret ~., data = ret_train_data, 
+                      method = "svmRadialSigma",
+                      trainControl = train_control, tuneLength = 20)
+model_fit_svm$bestTune
+
+#grid search based of the sigma and c gotten
+
+train_control2 = trainControl(method = "cv",
+                              number = 5,
+                              savePredictions = T)
+model_fit_svm1 = train(wabret ~., data = ret_train_data,
+                       method = "svmRadialSigma",
+                       tune_grid = expand.grid(
+                         .sigma = seq(0.03, 0.10, length = 20),
+                         .c = seq(0.5, 5, length = 20)
+                       ))
+model_fit_svm1
+```
+PREDICTIONS AND CONFUSION MATRIX TO COMPARE THE ACCURACY
+```{r}
+svm_pred = predict(svm_model, newdata = ret_test_data)
+table(svm_pred, ret_test_data$wabret)
+confusionMatrix(svm_pred, ret_test_data$wabret) #for c-classifications
+
+svm_pred2 = predict(model_fit_svm1, newdata = ret_test_data)
+summary(svm_pred2)
+
+confusionMatrix(svm_pred2, ret_test_data$wabret) #prediction using cross validation
+
+```
+SVM CLASSIFICATION PLOT
+```{r}
+varImp(model_fit_svm1) #variable of importance
+
+plot(varImp(model_fit_svm1, scale = F), main = "Var Imp: SVM CV")
+```
+LOGISTIC REGRESSION MODEL FOR WABRISK N= 300
+```{r}
+WABrisk300 = WABrisk300[2:4]
+WABrisk300 = WABrisk300 %>% rename(lab1risk = LAB1risk, 
+                                 lag2risk = Lag2risk, wabrisk = WABrisk)
+colnames(WABrisk300)
+
+WABrisk300$wabrisk = as.factor(WABrisk300$wabrisk)
+
+
+#splitting the WAB risk df into testing and training data
+set.seed(1234)
+WABrisk_split = initial_split(WABrisk300, prop = 0.5)
+risk_train_data = training(WABrisk_split)
+risk_test_data = testing(WABrisk_split)
+risk_logistic_model = glm(wabrisk ~., family = "binomial",
+                     data =risk_train_data)
+
+
+summary(risk_logistic_model)
+risk_logistic_model$coefficients
+```
+PREDICTION OF WABRET USING LOGISTIC REGRESSION
+```{r}
+risk_pred = predict(risk_logistic_model, new_data = risk_test_data, 
+               type = "response")
+table(risk_pred, risk_test_data$wabrisk)
+
+```
+ACCESSING THE LOGISTIC MODEL VISUALLY
+PLOTTING ROC
+```{r}
+pred_type2 = prediction(risk_pred, risk_test_data$wabrisk)
+perf = performance(pred_type2, measure = "tpr", x.measure = "fpr")
+summary(perf2)
+plot(perf2)
+```
+THE K NEAREST NEIGHBOR CLASSIFICATION FOR WABRISK
+```{r}
+set.seed(1234)
+
+#normalizing 
+normalize = function (x){
+  return((x - min(x))/ (max(x) - min (x))
+         )
+}
+colnames(WABrisk)
+WABrisk = WABrisk %>% rename(lag2risk = Lag2risk, 
+                             lab1risk = LAB1risk, wabrisk = WABrisk)
+WABrisk = WABrisk[2:4]
+WABrisk_n = as.data.frame(lapply(WABrisk300[c("lab1risk", "lag2risk")],
+                                normalize))
+summary(WABrisk_n)
+
+data_split = sample(1:nrow(WABrisk300),size=nrow(WABrisk300)*0.5,
+                    replace = FALSE) #random selection of 50% data.
+
+
+k_risk_train = WABrisk300[data_split,] # 50% training data
+k_risk_test = WABrisk300[-data_split,] # remaining 50% test data
+
+trControl = trainControl(method = "repeatedcv",
+                         number = 10,
+                         repeats = 3,
+                         classProbs = TRUE,
+                         summaryFunction = twoClassSummary)
+model_fit2 = train(wabrisk ~.,
+                  data = k_risk_train,
+                  method = "knn",
+                  trControl = trControl,
+                  tuneGrid = expand.grid(k = 1:10))
+```
+PREDICTION AND MODEL PERFORMANCE FOR KNN CLASSIFICATION FOR WABRISK
+```{r}
+pred2 = predict(model_fit2, newdata = k_risk_train)
+head(pred2)
+
+#Model performance
+varImp(model_fit2)
+model_fit2
+
+confusionMatrix(pred2, k_risk_train$wabret)
+```
+KNN CLASSIFICATION PLOT FOR WABRISK
+```{r}
+plot(model_fit2)
+```
+THE NAIVE BAYES CLASSIFICATION FOR WABRISK (USING K FOLD CROSS VALIDATION)
+```{r}
+WABrisk300
+colnames(WABrisk300)
+summary(WABrisk300)
+
+set.seed(2022)
+index = sample(2, nrow(WABrisk300), replace = T, 
+               prob = c(0.5, 0.5))
+bay_risk_train = WABrisk300[index == 1,]
+bay_risk_test = WABrisk300[index == 2, ]
+
+#Using the k fold validation
+train_control = trainControl(method = "cv", number = 10)
+bay_risk_fit = train(wabrisk ~., data = bay_risk_train, 
+                     method = "nb", trainControl = train_control)
+bay_risk_fit
+```
+THE NAIVE BAYES CLASSIFICATION USING THE LIBRARY E1021
+```{r}
+bay_risk_fit2 = naive_bayes(wabrisk ~.,
+                            data = bay_risk_train
+                            )
+bay_risk_fit2
+
+```
+PREDICTION VALUES FOR BOTH METHODS OF CLASSIFICATION
+```{r}
+p1 = predict(bay_risk_fit, newdata = bay_risk_test) #using cross validation
+p2 = predict(bay_risk_fit2, bay_risk_test) #using the e1021 lib
+
+tab = confusionMatrix(p1, bay_risk_test$wabrisk,
+                      positive = "LoRisk") #confusion matrix
+tab
+tab2 = confusionMatrix(p2, bay_risk_test$wabrisk) #confusion matrix
+tab2
+```
+THE NAVIE BAYES CLASSIFICATION PLOT FOR WABRISK
+```{r}
+WABrisk300 %>%
+  ggplot(aes(x = lab1risk, fill = wabrisk)) +
+  geom_density(alpha = 0.8, color = "black") +
+  ggtitle("DENSITY PLOT")
+```
+SUPPORT VECTOR MACHINE CLASSIFICATION FOR WABRISK
+```{r}
+WABrisk_split = initial_split(WABrisk300, prop = 0.5)
+risk_train_data = training(WABrisk_split)
+risk_test_data = testing(WABrisk_split)
+
+
+svm_model2 = svm(formula = wabrisk ~.,
+                data = risk_train_data,
+                type = "C-classification"
+)
+
+summary(svm_model2)
+```
+SVM CLASSIFICATION USING CROSS VALIDATION
+```{r}
+set.seed(2022)
+#since we are tuning a lot of hyper parameter, the right approach will be to first do a random search before a grid search
+train_control = trainControl(method = "cv", number = 5, search = "random",
+                             savePredictions = T)
+model_fit_svm = train(wabrisk ~., data = risk_train_data, 
+                      method = "svmRadialSigma",
+                      trainControl = train_control, tuneLength = 20)
+model_fit_svm$bestTune
+
+#grid search based of the sigma and c gotten
+
+train_control2 = trainControl(method = "cv",
+                              number = 5,
+                              savePredictions = T)
+model_fit_svm1 = train(wabrisk ~., data = risk_train_data,
+                       method = "svmRadialSigma",
+                       tune_grid = expand.grid(
+                         .sigma = seq(2.5, 4.0, length = 20),
+                         .c = seq(0.02, 1, length = 20)
+                       ))
+model_fit_svm1
+```
+PREDICTIONS AND CONFUSION MATRIX TO COMPARE THE ACCURACY
+```{r}
+svm_pred1 = predict(model_fit_svm1, newdata = risk_test_data)
+summary(svm_pred1)
+confusionMatrix(svm_pred1, risk_test_data$wabrisk, positive = "LoRisk") #prediction for cross validation
+
+svm_pred2 = predict(svm_model2, newdata = risk_test_data)
+table(svm_pred2, risk_test_data$wabrisk)
+confusionMatrix(svm_pred2, risk_test_data$wabrisk)
+```
+SVM CLASSIFICATION PLOT
+```{r}
+varImp(model_fit_svm1)
+
+plot(varImp(model_fit_svm1, scale = F), main = "Var Imp: SVM CV")
+
+```
