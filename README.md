@@ -1,2 +1,4 @@
-# NOOA Weather Set Data Analysis
-Using the NOOA data weather data set, I explored some of the columns and carried out further cleaning and changed the incorrect precip column using regular expressions and visualization using histogram to check the column's distribution, used the linear regression to check relationship. Explored polynomial regression and still on using the ridge regression model to explore R's tidyverse library, comparing the three models together to see which one should be recommended
+# This repository contains projects ranging from
+- Model development
+- Classification models
+- Reports on Machine Learning models used
